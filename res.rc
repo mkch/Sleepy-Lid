@@ -1,0 +1,4 @@
+#include "res.h"
+
+ICON_MAIN ICON main.ico
+1 24 manifest.xml

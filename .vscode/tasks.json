@@ -1,0 +1,42 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "cppbuild",
+			"label": "debug",
+			"command": "build.bat",
+			"args": [
+				"debug",
+				"WINDOWS",
+			],
+			"options": {
+				"cwd": "${fileDirname}"
+			},
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"detail": "build debug",
+		},
+		{
+			"type": "cppbuild",
+			"label": "release",
+			"command": "build.bat",
+			"args": [
+				"release",
+				"WINDOWS",
+			],
+			"options": {
+				"cwd": "${fileDirname}"
+			},
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build",
+			"detail": "build release"
+		}
+	]
+}
