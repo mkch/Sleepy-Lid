@@ -300,6 +300,7 @@ enum {
     ID_MONITOR_DISCONNECTED_AC_SHUT_DOWN,
 };
 
+static const auto APP_NAME = L"Sleepy Lid";
 static const auto LABEL_DO_NOTHING = L"Do nothing";
 static const auto LABEL_SLEEP = L"Sleep";
 static const auto LABEL_HIBERNATE = L"Hibernate";
@@ -717,7 +718,7 @@ void showNotification(HWND hwnd) {
     data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
     data.uCallbackMessage = UM_NOTIFY;
     data.hIcon = LoadIconW(GetModuleHandle(NULL), MAKEINTRESOURCEW(ICON_MAIN));
-    StringCchCopyW(data.szTip, sizeof data.szTip / sizeof data.szTip[0], L"Lid closing");
+    StringCchCopyW(data.szTip, sizeof data.szTip / sizeof data.szTip[0], APP_NAME);
     if (!Shell_NotifyIconW(NIM_ADD, &data)) {
         SHOW_LAST_ERROR();
         return;
