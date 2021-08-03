@@ -308,9 +308,11 @@ static const auto LABEL_USING_BATTERY = L"Using battery";
 static const auto LABEL_PLUGGED_IN = L"Plugged in";
 static const auto FMT_ON_BATTERY = L"On battery: [%s]";
 static const auto FMT_PLUGGED_IN = L"Plugged in: [%s]";
-static const auto FMT_MONITOR_CONNECTED = L"Connected: [Bat: %s | Plug: %s]";
-static const auto FMT_MONITOR_DISCONNECTED = L"Disconnected: [Bat: %s | Plug: %s]";
-static const auto LABEL_SYNC_MONITOR = L"Sync with external monitors";
+static const auto FMT_MONITOR_CONNECTED_DC = L"Monitor connected, on battery: [%s]";
+static const auto FMT_MONITOR_CONNECTED_AC = L"Monitor connected, plugged in: [%s]";
+static const auto FMT_MONITOR_DISCONNECTED_DC = L"Monitor disconnected, on battery: [%s]";
+static const auto FMT_MONITOR_DISCONNECTED_AC = L"Monitor disconnected, plugged in: [%s]";
+static const auto LABEL_SYNC_MONITOR = L"Sync with external monitor";
 static const auto LABEL_WHEN_LID_CLOSING = L"When lid closing";
 static const auto LABEL_EXIT = L"Exit";
 static const auto LABEL_START_ON_BOOT = L"Start on boot";
@@ -486,38 +488,29 @@ HMENU createNotifyPopupMenu() {
 
     std::array<wchar_t, 1024> buf;
 
-    const HMENU monitorConnected = CreateMenu();
-    StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
-                    FMT_ON_BATTERY,
-                    powerActionToString(actions.connectedDC()));
-    AppendMenuW(monitorConnected, MF_STRING | MF_POPUP, (UINT_PTR)monitorConnectedDC, buf.data());
-    StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
-                    FMT_PLUGGED_IN,
-                    powerActionToString(actions.connectedAC()));
-    AppendMenuW(monitorConnected, MF_STRING | MF_POPUP, (UINT_PTR)monitorConnectedAC, buf.data());
-
-    const HMENU monitorDisconnected = CreateMenu();
-    StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
-                    FMT_ON_BATTERY,
-                    powerActionToString(actions.disconnectedDC()));
-    AppendMenuW(monitorDisconnected, MF_STRING | MF_POPUP, (UINT_PTR)monitorDisconnectedDC, buf.data());
-    StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
-                    FMT_PLUGGED_IN,
-                    powerActionToString(actions.disconnectedAC()));
-    AppendMenuW(monitorDisconnected, MF_STRING | MF_POPUP, (UINT_PTR)monitorDisconnectedAC, buf.data());
-
     const HMENU monitor = CreateMenu();
     AppendMenuW(monitor, MF_STRING | (syncMonitor ? MF_CHECKED : 0), ID_SYNC_MONITOR, (syncMonitor ? LABEL_ON : LABEL_OFF));
+    SetMenuDefaultItem(monitor, 0, TRUE);
+
     StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
-                    FMT_MONITOR_CONNECTED,
-                    powerActionToString(actions.connectedDC()),
+                    FMT_MONITOR_CONNECTED_DC,
+                    powerActionToString(actions.connectedDC()));
+    AppendMenuW(monitor, MF_STRING | MF_POPUP | MF_MENUBARBREAK | (syncMonitor ? 0 : MF_GRAYED), (UINT_PTR)monitorConnectedDC, buf.data());
+    StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
+                    FMT_MONITOR_CONNECTED_AC,
                     powerActionToString(actions.connectedAC()));
-    AppendMenuW(monitor, MF_STRING | MF_POPUP | (syncMonitor ? 0 : MF_DISABLED), (UINT_PTR)monitorConnected, buf.data());
+    AppendMenuW(monitor, MF_STRING | MF_POPUP | (syncMonitor ? 0 : MF_GRAYED), (UINT_PTR)monitorConnectedAC, buf.data());
+
+    AppendMenuW(monitor, MF_SEPARATOR, 0, NULL);
+
     StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
-                    FMT_MONITOR_DISCONNECTED,
-                    powerActionToString(actions.disconnectedDC()),
+                    FMT_MONITOR_DISCONNECTED_DC,
+                    powerActionToString(actions.disconnectedDC()));
+    AppendMenuW(monitor, MF_STRING | MF_POPUP | (syncMonitor ? 0 : MF_GRAYED), (UINT_PTR)monitorDisconnectedDC, buf.data());
+    StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
+                    FMT_MONITOR_DISCONNECTED_AC,
                     powerActionToString(actions.disconnectedAC()));
-    AppendMenuW(monitor, MF_STRING | MF_POPUP | (syncMonitor ? 0 : MF_DISABLED), (UINT_PTR)monitorDisconnected, buf.data());
+    AppendMenuW(monitor, MF_STRING | MF_POPUP | (syncMonitor ? 0 : MF_GRAYED), (UINT_PTR)monitorDisconnectedAC, buf.data());
 
     const HMENU lidClosing = CreateMenu();
 
