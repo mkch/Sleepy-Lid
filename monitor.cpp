@@ -20,7 +20,7 @@ BOOL RegisterMonitorNotification(HWND hwnd) {
 }
 
 // https://stackoverflow.com/questions/4958683/how-do-i-get-the-actual-monitor-name-as-seen-in-the-resolution-dialog
-LONG connectedMonitors(vector<wstring> &names) {
+LONG connectedMonitors(vector<wstring>& names) {
     const UINT32 MAX_COUNT = 0xFF;
     UINT32 pathCount = MAX_COUNT;
     UINT32 modeCount = MAX_COUNT;
@@ -50,4 +50,20 @@ LONG connectedMonitors(vector<wstring> &names) {
         names.push_back(deviceName.monitorFriendlyDeviceName);
     }
     return ERROR_SUCCESS;
+}
+
+LONG isExternalMonitorsConnected(bool* connected) {
+    const UINT32 MAX_COUNT = 0xFF;
+
+    DISPLAYCONFIG_PATH_INFO pathes[MAX_COUNT];
+    DISPLAYCONFIG_MODE_INFO modes[MAX_COUNT];
+    UINT32 Pathcount = sizeof(pathes) / sizeof(pathes[0]);
+    UINT32 modeCount = sizeof(modes) / sizeof(modes[0]);
+
+    DISPLAYCONFIG_TOPOLOGY_ID id = DISPLAYCONFIG_TOPOLOGY_INTERNAL;
+    LONG ret = QueryDisplayConfig(QDC_DATABASE_CURRENT, &Pathcount, pathes, &modeCount, modes, &id);
+    if (ret == ERROR_SUCCESS) {
+        *connected = id != DISPLAYCONFIG_TOPOLOGY_INTERNAL;
+    }
+    return ret;
 }

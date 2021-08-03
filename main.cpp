@@ -8,28 +8,87 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <array>
 
 #include "monitor.h"
 #include "power.h"
 #include "res.h"
 
-#ifdef DEBUG
-@
-#endif
-
 using namespace std;
+
+class monitorActions {
+private:
+    typedef std::array<unsigned char, 4> arrayType;
+    arrayType actions;
+
+public:
+    monitorActions() {}
+    bool set(const wstring str) {
+        if (str.length() != actions.size()) {
+            return false;
+        }
+        arrayType temp;
+        for (int i = 0; i < actions.size(); i++) {
+            const int n = str[i] - L'0';
+            if (n < INDEX_DO_NOTHING || n > INDEX_SHUT_DOWN) {
+                return false;
+            }
+            temp[i] = (char)n;
+        }
+        actions = temp;
+        return true;
+    }
+
+    wstring toString() {
+        wstring ret(actions.size(), L'0');
+        std::transform(actions.begin(), actions.end(), ret.begin(), [](auto a) { return L'0' + a; });
+        return ret;
+    }
+
+    int connectedDC() {
+        return actions[0];
+    }
+    void setConnectedDC(int index) {
+        if (index < INDEX_DO_NOTHING || index > INDEX_SHUT_DOWN)
+            return;
+        actions[0] = index;
+    }
+
+    int connectedAC() {
+        return actions[1];
+    }
+    void setConnectedAC(int index) {
+        if (index < INDEX_DO_NOTHING || index > INDEX_SHUT_DOWN)
+            return;
+        actions[1] = index;
+    }
+
+    int disconnectedDC() {
+        return actions[2];
+    }
+    void setDisconnectedDC(int index) {
+        if (index < INDEX_DO_NOTHING || index > INDEX_SHUT_DOWN)
+            return;
+        actions[2] = index;
+    }
+
+    int disconnectedAC() {
+        return actions[3];
+    }
+    void setDisconnectedAC(int index) {
+        if (index < INDEX_DO_NOTHING || index > INDEX_SHUT_DOWN)
+            return;
+        actions[3] = index;
+    }
+};
 
 // ID of Shell_NotifyIconW.
 static const UINT NOTIFY_ID = 1;
 // Notify message used by Shell_NotifyIconW.
 static const UINT UM_NOTIFY = WM_USER + 1;
 
-// Name of displays to keep the machine awake when the lid is closing.
-static set<wstring> keepAwakeDisplays;
-// Power actions before automatically turning power actions to "Do nothing".
-// Used to restore the the previous value after external displays disconnected.
-static DWORD lastPowerAction_Battery = INDEX_SLEEP;
-static DWORD lastPowerAction_PluggedIn = INDEX_SLEEP;
+static bool syncMonitor = false;
+static monitorActions actions;
 
 // The extension of config file.
 static const auto CONFIG_FILE_NAME = L"SleepyLid.ini";
@@ -64,40 +123,29 @@ int wmain(int argc, wchar_t *argv[]) {
 // ini section name.
 static const auto CONFIG_LID_CLOSING = L"LidClosing";
 // ini key.
-static const auto CONFIG_KEEP_AWAKE_DISPLAY_BASE = L"KeepAwakeDisplay";
-
-// Max count of external displays to save to config file.
-static const int MAX_DISPLAY_COUNT = 255;
+static const auto CONFIG_SYNC_MONITOR = L"SyncMonitor";
+static const auto CONFIG_MONITOR_POWER_ACTIONS = L"MonitorActions";
 
 // Read settings from config file.
 void readConfig() {
-    for (int i = 0; i < MAX_DISPLAY_COUNT; i++) {
-        wstring key(CONFIG_KEEP_AWAKE_DISPLAY_BASE);
-        key.append(std::to_wstring(i + 1));
-        wchar_t display[1024] = {0};
-        if (!GetPrivateProfileStringW(CONFIG_LID_CLOSING, key.c_str(), L"",
-                                      display, sizeof(display) / sizeof(display[0]),
-                                      configFilePath.c_str())) {
-            break;
-        }
-        keepAwakeDisplays.insert(display);
+    syncMonitor = GetPrivateProfileIntW(CONFIG_LID_CLOSING, CONFIG_SYNC_MONITOR, 0, configFilePath.c_str()) != 0;
+    std::array<wchar_t, 5> buf;
+    if (GetPrivateProfileStringW(CONFIG_LID_CLOSING, CONFIG_MONITOR_POWER_ACTIONS, L"0000",
+                                 buf.data(), buf.size(),
+                                 configFilePath.c_str()) == buf.size() - 1) {
+        actions.set(buf.data());
     }
 }
 
 // Write settings to config file.
 void writeConfig() {
-    WritePrivateProfileStringW(CONFIG_LID_CLOSING, NULL, NULL,
+    WritePrivateProfileStringW(CONFIG_LID_CLOSING, CONFIG_SYNC_MONITOR,
+                               syncMonitor ? L"1" : L"0",
                                configFilePath.c_str());
-    int count = min(MAX_DISPLAY_COUNT, keepAwakeDisplays.size());
-    int i = 0;
-    for_each(keepAwakeDisplays.begin(), keepAwakeDisplays.end(),
-             [&i](const auto &value) {
-                 wstring key(CONFIG_KEEP_AWAKE_DISPLAY_BASE);
-                 key.append(std::to_wstring(i + 1));
-                 WritePrivateProfileStringW(
-                     CONFIG_LID_CLOSING, key.c_str(), value.c_str(), configFilePath.c_str());
-                 i++;
-             });
+    const wstring str = actions.toString();
+    WritePrivateProfileStringW(CONFIG_LID_CLOSING, CONFIG_MONITOR_POWER_ACTIONS,
+                               str.c_str(),
+                               configFilePath.c_str());
 }
 
 // Show a message box with the error description of lastError.
@@ -176,58 +224,31 @@ static const UINT_PTR DELAY_DEVICE_CHANGE_TIMER = 1;
 // Batch interval of  WM_DEVICECHANGE message processing.
 static const UINT DEVICE_CHANGE_DELAY = 3000;
 
-// Any displays of interest ate connected currently.
-static bool displayConnected = false;
-
 // Set power action based on the current display connectivity.
 void applyDisplayConnectivity() {
-    vector<wstring> monitors;
-    auto ret = connectedMonitors(monitors);
-    if (ret != ERROR_SUCCESS) {
+    if (!syncMonitor)
+        return;
+    bool connected = false;
+    auto ret = isExternalMonitorsConnected(&connected);
+    if (ret != ERROR_SUCCESS)
         goto handle_error;
-    }
-    sort(monitors.begin(), monitors.end());
-    bool found = false;
-    for (auto it = keepAwakeDisplays.begin(); it != keepAwakeDisplays.end(); it++) {
-        if (binary_search(monitors.begin(), monitors.end(), *it)) {
-            found = true;
-            break;
-        }
-    }
 
-    if (found) {
-        if (!displayConnected) {
-            displayConnected = true;
-            ret = readLidCloseActionIndex_Battery(&lastPowerAction_Battery);
-            if (ret != ERROR_SUCCESS) {
-                goto handle_error;
-            }
-            ret = writeLidCloseActionIndex_Battery(INDEX_DO_NOTHING);
-            if (ret != ERROR_SUCCESS) {
-                goto handle_error;
-            }
+    if (connected) {
+        ret = writeLidCloseActionIndexDC(actions.connectedDC());
+        if (ret != ERROR_SUCCESS)
+            goto handle_error;
 
-            ret = readLidCloseActionIndex_PluggedIn(&lastPowerAction_PluggedIn);
-            if (ret != ERROR_SUCCESS) {
-                goto handle_error;
-            }
-            ret = writeLidCloseActionIndex_PluggedIn(INDEX_DO_NOTHING);
-            if (ret != ERROR_SUCCESS) {
-                goto handle_error;
-            }
-        }
+        ret = writeLidCloseActionIndexAC(actions.connectedAC());
+        if (ret != ERROR_SUCCESS)
+            goto handle_error;
     } else {
-        if (displayConnected) {
-            displayConnected = false;
-            ret = writeLidCloseActionIndex_Battery(lastPowerAction_Battery);
-            if (ret != ERROR_SUCCESS) {
-                goto handle_error;
-            }
-            ret = writeLidCloseActionIndex_PluggedIn(lastPowerAction_PluggedIn);
-            if (ret != ERROR_SUCCESS) {
-                goto handle_error;
-            }
-        }
+        ret = writeLidCloseActionIndexDC(actions.disconnectedDC());
+        if (ret != ERROR_SUCCESS)
+            goto handle_error;
+
+        ret = writeLidCloseActionIndexAC(actions.disconnectedAC());
+        if (ret != ERROR_SUCCESS)
+            goto handle_error;
     }
     return;
 
@@ -246,17 +267,37 @@ enum {
     ID_EXIT = 1,
     ID_AUTO_RUN,
 
-    ID_BATTERY_DO_NOTHING,
-    ID_BATTERY_SLEEP,
-    ID_BATTERY_HIBERNATE,
-    ID_BATTERY_SHUT_DOWN,
+    ID_DC_DO_NOTHING,
+    ID_DC_SLEEP,
+    ID_DC_HIBERNATE,
+    ID_DC_SHUT_DOWN,
 
-    ID_PLUGGED_IN_DO_NOTHING,
-    ID_PLUGGED_IN_SLEEP,
-    ID_PLUGGED_IN_HIBERNATE,
-    ID_PLUGGED_IN_SHUT_DOWN,
+    ID_AC_DO_NOTHING,
+    ID_AC_SLEEP,
+    ID_AC_HIBERNATE,
+    ID_AC_SHUT_DOWN,
 
-    ID_MONITOR_FIRST,  // Must be the last one.
+    ID_SYNC_MONITOR,
+
+    ID_MONITOR_CONNECTED_DC_DO_NOTHING,
+    ID_MONITOR_CONNECTED_DC_SLEEP,
+    ID_MONITOR_CONNECTED_DC_HIBERNATE,
+    ID_MONITOR_CONNECTED_DC_SHUT_DOWN,
+
+    ID_MONITOR_CONNECTED_AC_DO_NOTHING,
+    ID_MONITOR_CONNECTED_AC_SLEEP,
+    ID_MONITOR_CONNECTED_AC_HIBERNATE,
+    ID_MONITOR_CONNECTED_AC_SHUT_DOWN,
+
+    ID_MONITOR_DISCONNECTED_DC_DO_NOTHING,
+    ID_MONITOR_DISCONNECTED_DC_SLEEP,
+    ID_MONITOR_DISCONNECTED_DC_HIBERNATE,
+    ID_MONITOR_DISCONNECTED_DC_SHUT_DOWN,
+
+    ID_MONITOR_DISCONNECTED_AC_DO_NOTHING,
+    ID_MONITOR_DISCONNECTED_AC_SLEEP,
+    ID_MONITOR_DISCONNECTED_AC_HIBERNATE,
+    ID_MONITOR_DISCONNECTED_AC_SHUT_DOWN,
 };
 
 static const auto LABEL_DO_NOTHING = L"Do nothing";
@@ -267,10 +308,14 @@ static const auto LABEL_USING_BATTERY = L"Using battery";
 static const auto LABEL_PLUGGED_IN = L"Plugged in";
 static const auto FMT_ON_BATTERY = L"On battery: [%s]";
 static const auto FMT_PLUGGED_IN = L"Plugged in: [%s]";
-static const auto LABEL_AWAKE_DISPLAY = L"Keep awake if connected:";
+static const auto FMT_MONITOR_CONNECTED = L"Connected: [Bat: %s | Plug: %s]";
+static const auto FMT_MONITOR_DISCONNECTED = L"Disconnected: [Bat: %s | Plug: %s]";
+static const auto LABEL_SYNC_MONITOR = L"Sync with external monitors";
 static const auto LABEL_WHEN_LID_CLOSING = L"When lid closing";
 static const auto LABEL_EXIT = L"Exit";
 static const auto LABEL_START_ON_BOOT = L"Start on boot";
+static const auto LABEL_ON = L"ON";
+static const auto LABEL_OFF = L"OFF";
 
 static const auto LABEL_UNKNOWN = L"???";
 
@@ -340,108 +385,155 @@ void disableStartOnBoot() {
 
 // Creates a popup menu which can be used to show when notification icon is
 // clicked.
-// If the return value is not NULL, the memory pointed by displayList is set
-// to the pointer of display name list in sub menu. This vector MUST be deleted
-// after use.
-HMENU createNotifyPopupMenu(vector<wstring> **displayList) {
+HMENU createNotifyPopupMenu() {
     DWORD actionBattery = 0;
-    DWORD ret = readLidCloseActionIndex_Battery(&actionBattery);
+    DWORD ret = readLidCloseActionIndexDC(&actionBattery);
     if (ret != ERROR_SUCCESS) {
         SHOW_ERROR(ret);
         exit(1);
     }
 
     DWORD actionPluggedIn = 0;
-    ret = readLidCloseActionIndex_PluggedIn(&actionPluggedIn);
+    ret = readLidCloseActionIndexAC(&actionPluggedIn);
     if (ret != ERROR_SUCCESS) {
         SHOW_ERROR(ret);
         exit(1);
     }
 
-    HMENU onBattery = CreateMenu();
+    const HMENU onBattery = CreateMenu();
     AppendMenuW(onBattery,
                 MF_STRING | (actionBattery == INDEX_DO_NOTHING ? MF_CHECKED : 0),
-                ID_BATTERY_DO_NOTHING, LABEL_DO_NOTHING);
+                ID_DC_DO_NOTHING, LABEL_DO_NOTHING);
     AppendMenuW(onBattery,
                 MF_STRING | (actionBattery == INDEX_SLEEP ? MF_CHECKED : 0),
-                ID_BATTERY_SLEEP, LABEL_SLEEP);
+                ID_DC_SLEEP, LABEL_SLEEP);
     AppendMenuW(onBattery,
                 MF_STRING | (actionBattery == INDEX_HIBERNATE ? MF_CHECKED : 0),
-                ID_BATTERY_HIBERNATE, LABEL_HIBERNATE);
+                ID_DC_HIBERNATE, LABEL_HIBERNATE);
     AppendMenuW(onBattery,
                 MF_STRING | (actionBattery == INDEX_SHUT_DOWN ? MF_CHECKED : 0),
-                ID_BATTERY_SHUT_DOWN, LABEL_SHUT_DOWN);
+                ID_DC_SHUT_DOWN, LABEL_SHUT_DOWN);
 
     HMENU pluggedIn = CreateMenu();
     AppendMenuW(pluggedIn,
                 MF_STRING | (actionPluggedIn == INDEX_DO_NOTHING ? MF_CHECKED : 0),
-                ID_PLUGGED_IN_DO_NOTHING, LABEL_DO_NOTHING);
+                ID_AC_DO_NOTHING, LABEL_DO_NOTHING);
     AppendMenuW(pluggedIn,
                 MF_STRING | (actionPluggedIn == INDEX_SLEEP ? MF_CHECKED : 0),
-                ID_PLUGGED_IN_SLEEP, LABEL_SLEEP);
+                ID_AC_SLEEP, LABEL_SLEEP);
     AppendMenuW(pluggedIn,
                 MF_STRING | (actionPluggedIn == INDEX_HIBERNATE ? MF_CHECKED : 0),
-                ID_PLUGGED_IN_HIBERNATE, LABEL_HIBERNATE);
+                ID_AC_HIBERNATE, LABEL_HIBERNATE);
     AppendMenuW(pluggedIn,
                 MF_STRING | (actionPluggedIn == INDEX_SHUT_DOWN ? MF_CHECKED : 0),
-                ID_PLUGGED_IN_SHUT_DOWN, LABEL_SHUT_DOWN);
+                ID_AC_SHUT_DOWN, LABEL_SHUT_DOWN);
 
-    HMENU monitors = CreateMenu();
+    const HMENU monitorConnectedDC = CreateMenu();
+    AppendMenuW(monitorConnectedDC,
+                MF_STRING | (actions.connectedDC() == INDEX_DO_NOTHING ? MF_CHECKED : 0),
+                ID_MONITOR_CONNECTED_DC_DO_NOTHING, LABEL_DO_NOTHING);
+    AppendMenuW(monitorConnectedDC,
+                MF_STRING | (actions.connectedDC() == INDEX_SLEEP ? MF_CHECKED : 0),
+                ID_MONITOR_CONNECTED_DC_SLEEP, LABEL_SLEEP);
+    AppendMenuW(monitorConnectedDC,
+                MF_STRING | (actions.connectedDC() == INDEX_HIBERNATE ? MF_CHECKED : 0),
+                ID_MONITOR_CONNECTED_DC_HIBERNATE, LABEL_HIBERNATE);
+    AppendMenuW(monitorConnectedDC,
+                MF_STRING | (actions.connectedDC() == INDEX_SHUT_DOWN ? MF_CHECKED : 0),
+                ID_MONITOR_CONNECTED_DC_SHUT_DOWN, LABEL_SHUT_DOWN);
 
-    vector<wstring> connected;
-    ret = connectedMonitors(connected);
-    if (ret != ERROR_SUCCESS) {
-        SHOW_ERROR(ret);
-        exit(1);
-    }
+    const HMENU monitorConnectedAC = CreateMenu();
+    AppendMenuW(monitorConnectedAC,
+                MF_STRING | (actions.connectedAC() == INDEX_DO_NOTHING ? MF_CHECKED : 0),
+                ID_MONITOR_CONNECTED_AC_DO_NOTHING, LABEL_DO_NOTHING);
+    AppendMenuW(monitorConnectedAC,
+                MF_STRING | (actions.connectedAC() == INDEX_SLEEP ? MF_CHECKED : 0),
+                ID_MONITOR_CONNECTED_AC_SLEEP, LABEL_SLEEP);
+    AppendMenuW(monitorConnectedAC,
+                MF_STRING | (actions.connectedAC() == INDEX_HIBERNATE ? MF_CHECKED : 0),
+                ID_MONITOR_CONNECTED_AC_HIBERNATE, LABEL_HIBERNATE);
+    AppendMenuW(monitorConnectedAC,
+                MF_STRING | (actions.connectedAC() == INDEX_SHUT_DOWN ? MF_CHECKED : 0),
+                ID_MONITOR_CONNECTED_AC_SHUT_DOWN, LABEL_SHUT_DOWN);
 
-    sort(connected.begin(), connected.end());
-    const auto list = new vector<wstring>(connected);
-    *displayList = list;
-    // Append all the elements in keepAwakeDisplays.
-    list->insert(list->end(), keepAwakeDisplays.begin(), keepAwakeDisplays.end());
-    // Erase duplicated elements in connected.
-    // https://en.cppreference.com/w/cpp/algorithm/unique
-    sort(list->begin(), list->end());
-    list->erase(unique(list->begin(), list->end()), list->end());
+    const HMENU monitorDisconnectedDC = CreateMenu();
+    AppendMenuW(monitorDisconnectedDC,
+                MF_STRING | (actions.disconnectedDC() == INDEX_DO_NOTHING ? MF_CHECKED : 0),
+                ID_MONITOR_DISCONNECTED_DC_DO_NOTHING, LABEL_DO_NOTHING);
+    AppendMenuW(monitorDisconnectedDC,
+                MF_STRING | (actions.disconnectedDC() == INDEX_SLEEP ? MF_CHECKED : 0),
+                ID_MONITOR_DISCONNECTED_DC_SLEEP, LABEL_SLEEP);
+    AppendMenuW(monitorDisconnectedDC,
+                MF_STRING | (actions.disconnectedDC() == INDEX_HIBERNATE ? MF_CHECKED : 0),
+                ID_MONITOR_DISCONNECTED_DC_HIBERNATE, LABEL_HIBERNATE);
+    AppendMenuW(monitorDisconnectedDC,
+                MF_STRING | (actions.disconnectedDC() == INDEX_SHUT_DOWN ? MF_CHECKED : 0),
+                ID_MONITOR_DISCONNECTED_DC_SHUT_DOWN, LABEL_SHUT_DOWN);
 
-    for (int i = 0; i < list->size(); i++) {
-        const wstring &item = list->at(i);
-        UINT flag = 0;
-        wstring title = item;
-        if (keepAwakeDisplays.find(item) != keepAwakeDisplays.end()) {
-            flag = MF_CHECKED;
-        }
-        if (binary_search(connected.begin(), connected.end(), item)) {
-            title += L" *";  // Connected mark.
-        }
-        AppendMenuW(monitors, MF_STRING | flag, ID_MONITOR_FIRST + i, title.c_str());
-    }
+    const HMENU monitorDisconnectedAC = CreateMenu();
+    AppendMenuW(monitorDisconnectedAC,
+                MF_STRING | (actions.disconnectedAC() == INDEX_DO_NOTHING ? MF_CHECKED : 0),
+                ID_MONITOR_DISCONNECTED_AC_DO_NOTHING, LABEL_DO_NOTHING);
+    AppendMenuW(monitorDisconnectedAC,
+                MF_STRING | (actions.disconnectedAC() == INDEX_SLEEP ? MF_CHECKED : 0),
+                ID_MONITOR_DISCONNECTED_AC_SLEEP, LABEL_SLEEP);
+    AppendMenuW(monitorDisconnectedAC,
+                MF_STRING | (actions.disconnectedAC() == INDEX_HIBERNATE ? MF_CHECKED : 0),
+                ID_MONITOR_DISCONNECTED_AC_HIBERNATE, LABEL_HIBERNATE);
+    AppendMenuW(monitorDisconnectedAC,
+                MF_STRING | (actions.disconnectedAC() == INDEX_SHUT_DOWN ? MF_CHECKED : 0),
+                ID_MONITOR_DISCONNECTED_AC_SHUT_DOWN, LABEL_SHUT_DOWN);
 
-    HMENU lidClosing = CreateMenu();
+    std::array<wchar_t, 1024> buf;
 
-    wchar_t buf[1024] = {0};
-    StringCbPrintfW(buf, sizeof(buf), FMT_ON_BATTERY, powerActionToString(actionBattery));
-    AppendMenuW(lidClosing, MF_POPUP, (UINT_PTR)onBattery, buf);
-    StringCbPrintfW(buf, sizeof(buf), FMT_PLUGGED_IN, powerActionToString(actionPluggedIn));
-    AppendMenuW(lidClosing, MF_POPUP, (UINT_PTR)pluggedIn, buf);
+    const HMENU monitorConnected = CreateMenu();
+    StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
+                    FMT_ON_BATTERY,
+                    powerActionToString(actions.connectedDC()));
+    AppendMenuW(monitorConnected, MF_STRING | MF_POPUP, (UINT_PTR)monitorConnectedDC, buf.data());
+    StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
+                    FMT_PLUGGED_IN,
+                    powerActionToString(actions.connectedAC()));
+    AppendMenuW(monitorConnected, MF_STRING | MF_POPUP, (UINT_PTR)monitorConnectedAC, buf.data());
+
+    const HMENU monitorDisconnected = CreateMenu();
+    StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
+                    FMT_ON_BATTERY,
+                    powerActionToString(actions.disconnectedDC()));
+    AppendMenuW(monitorDisconnected, MF_STRING | MF_POPUP, (UINT_PTR)monitorDisconnectedDC, buf.data());
+    StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
+                    FMT_PLUGGED_IN,
+                    powerActionToString(actions.disconnectedAC()));
+    AppendMenuW(monitorDisconnected, MF_STRING | MF_POPUP, (UINT_PTR)monitorDisconnectedAC, buf.data());
+
+    const HMENU monitor = CreateMenu();
+    AppendMenuW(monitor, MF_STRING | (syncMonitor ? MF_CHECKED : 0), ID_SYNC_MONITOR, (syncMonitor ? LABEL_ON : LABEL_OFF));
+    StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
+                    FMT_MONITOR_CONNECTED,
+                    powerActionToString(actions.connectedDC()),
+                    powerActionToString(actions.connectedAC()));
+    AppendMenuW(monitor, MF_STRING | MF_POPUP | (syncMonitor ? 0 : MF_DISABLED), (UINT_PTR)monitorConnected, buf.data());
+    StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
+                    FMT_MONITOR_DISCONNECTED,
+                    powerActionToString(actions.disconnectedDC()),
+                    powerActionToString(actions.disconnectedAC()));
+    AppendMenuW(monitor, MF_STRING | MF_POPUP | (syncMonitor ? 0 : MF_DISABLED), (UINT_PTR)monitorDisconnected, buf.data());
+
+    const HMENU lidClosing = CreateMenu();
+
+    StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
+                    FMT_ON_BATTERY,
+                    powerActionToString(actionBattery));
+    AppendMenuW(lidClosing, MF_STRING | MF_POPUP, (UINT_PTR)onBattery, buf.data());
+    StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
+                    FMT_PLUGGED_IN,
+                    powerActionToString(actionPluggedIn));
+    AppendMenuW(lidClosing, MF_STRING | MF_POPUP, (UINT_PTR)pluggedIn, buf.data());
     AppendMenuW(lidClosing, MF_SEPARATOR, 0, NULL);
-    AppendMenuW(lidClosing, MF_SEPARATOR, 0, NULL);
 
-    wstring title(LABEL_AWAKE_DISPLAY);
-    for_each(keepAwakeDisplays.begin(), keepAwakeDisplays.end(),
-             [&title, &connected](auto const &m) {
-                 title.append(L" [").append(m);
-                 if (binary_search(connected.begin(), connected.end(), m)) {
-                     title.append(L" *");  // Connected mark.
-                 }
-                 title.append(L"]");
-             });
-    AppendMenuW(lidClosing,
-                MF_POPUP | (keepAwakeDisplays.empty() ? 0 : MF_CHECKED),
-                (UINT_PTR)monitors, title.c_str());
+    AppendMenuW(lidClosing, MF_STRING | MF_POPUP | (syncMonitor ? MF_CHECKED : 0), (UINT_PTR)monitor, LABEL_SYNC_MONITOR);
 
-    HMENU menu = CreatePopupMenu();
+    const HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_POPUP, (UINT_PTR)lidClosing, LABEL_WHEN_LID_CLOSING);
     AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
 
@@ -452,8 +544,7 @@ HMENU createNotifyPopupMenu(vector<wstring> **displayList) {
     return menu;
 }
 
-void processNotifyMenuCmd(HWND hwnd, UINT_PTR cmd,
-                          vector<wstring> *displayList) {
+void processNotifyMenuCmd(HWND hwnd, UINT_PTR cmd) {
     DWORD ret = ERROR_SUCCESS;
     switch (cmd) {
     case ID_EXIT:
@@ -466,43 +557,117 @@ void processNotifyMenuCmd(HWND hwnd, UINT_PTR cmd,
             enableStartOnBoot();
         }
         break;
-    case ID_BATTERY_DO_NOTHING:
-        ret = writeLidCloseActionIndex_Battery(INDEX_DO_NOTHING);
+    case ID_DC_DO_NOTHING:
+        ret = writeLidCloseActionIndexDC(INDEX_DO_NOTHING);
         break;
-    case ID_BATTERY_SLEEP:
-        ret = writeLidCloseActionIndex_Battery(INDEX_SLEEP);
+    case ID_DC_SLEEP:
+        ret = writeLidCloseActionIndexDC(INDEX_SLEEP);
         break;
-    case ID_BATTERY_HIBERNATE:
-        ret = writeLidCloseActionIndex_Battery(INDEX_HIBERNATE);
+    case ID_DC_HIBERNATE:
+        ret = writeLidCloseActionIndexDC(INDEX_HIBERNATE);
         break;
-    case ID_BATTERY_SHUT_DOWN:
-        ret = writeLidCloseActionIndex_Battery(INDEX_SHUT_DOWN);
+    case ID_DC_SHUT_DOWN:
+        ret = writeLidCloseActionIndexDC(INDEX_SHUT_DOWN);
         break;
-    case ID_PLUGGED_IN_DO_NOTHING:
-        ret = writeLidCloseActionIndex_PluggedIn(INDEX_DO_NOTHING);
+    case ID_AC_DO_NOTHING:
+        ret = writeLidCloseActionIndexAC(INDEX_DO_NOTHING);
         break;
-    case ID_PLUGGED_IN_SLEEP:
-        ret = writeLidCloseActionIndex_PluggedIn(INDEX_SLEEP);
+    case ID_AC_SLEEP:
+        ret = writeLidCloseActionIndexAC(INDEX_SLEEP);
         break;
-    case ID_PLUGGED_IN_HIBERNATE:
-        ret = writeLidCloseActionIndex_PluggedIn(INDEX_HIBERNATE);
+    case ID_AC_HIBERNATE:
+        ret = writeLidCloseActionIndexAC(INDEX_HIBERNATE);
         break;
-    case ID_PLUGGED_IN_SHUT_DOWN:
-        ret = writeLidCloseActionIndex_PluggedIn(INDEX_SHUT_DOWN);
+    case ID_AC_SHUT_DOWN:
+        ret = writeLidCloseActionIndexAC(INDEX_SHUT_DOWN);
+        break;
+    case ID_SYNC_MONITOR:
+        syncMonitor = !syncMonitor;
+        if (syncMonitor) {
+            applyDisplayConnectivity();
+        }
+        writeConfig();
+        break;
+    case ID_MONITOR_CONNECTED_DC_DO_NOTHING:
+        actions.setConnectedDC(INDEX_DO_NOTHING);
+        applyDisplayConnectivity();
+        writeConfig();
+        break;
+    case ID_MONITOR_CONNECTED_DC_SLEEP:
+        actions.setConnectedDC(INDEX_SLEEP);
+        applyDisplayConnectivity();
+        writeConfig();
+        break;
+    case ID_MONITOR_CONNECTED_DC_HIBERNATE:
+        actions.setConnectedDC(INDEX_HIBERNATE);
+        applyDisplayConnectivity();
+        writeConfig();
+        break;
+    case ID_MONITOR_CONNECTED_DC_SHUT_DOWN:
+        actions.setConnectedDC(INDEX_SHUT_DOWN);
+        applyDisplayConnectivity();
+        writeConfig();
+        break;
+    case ID_MONITOR_CONNECTED_AC_DO_NOTHING:
+        actions.setConnectedAC(INDEX_DO_NOTHING);
+        applyDisplayConnectivity();
+        writeConfig();
+        break;
+    case ID_MONITOR_CONNECTED_AC_SLEEP:
+        actions.setConnectedAC(INDEX_SLEEP);
+        applyDisplayConnectivity();
+        writeConfig();
+        break;
+    case ID_MONITOR_CONNECTED_AC_HIBERNATE:
+        actions.setConnectedAC(INDEX_HIBERNATE);
+        applyDisplayConnectivity();
+        writeConfig();
+        break;
+    case ID_MONITOR_CONNECTED_AC_SHUT_DOWN:
+        actions.setConnectedAC(INDEX_SHUT_DOWN);
+        applyDisplayConnectivity();
+        writeConfig();
+        break;
+    case ID_MONITOR_DISCONNECTED_DC_DO_NOTHING:
+        actions.setDisconnectedDC(INDEX_DO_NOTHING);
+        applyDisplayConnectivity();
+        writeConfig();
+        break;
+    case ID_MONITOR_DISCONNECTED_DC_SLEEP:
+        actions.setDisconnectedDC(INDEX_SLEEP);
+        applyDisplayConnectivity();
+        writeConfig();
+        break;
+    case ID_MONITOR_DISCONNECTED_DC_HIBERNATE:
+        actions.setDisconnectedDC(INDEX_HIBERNATE);
+        applyDisplayConnectivity();
+        writeConfig();
+        break;
+    case ID_MONITOR_DISCONNECTED_DC_SHUT_DOWN:
+        actions.setDisconnectedDC(INDEX_SHUT_DOWN);
+        applyDisplayConnectivity();
+        writeConfig();
+        break;
+    case ID_MONITOR_DISCONNECTED_AC_DO_NOTHING:
+        actions.setDisconnectedAC(INDEX_DO_NOTHING);
+        applyDisplayConnectivity();
+        writeConfig();
+        break;
+    case ID_MONITOR_DISCONNECTED_AC_SLEEP:
+        actions.setDisconnectedAC(INDEX_SLEEP);
+        applyDisplayConnectivity();
+        writeConfig();
+        break;
+    case ID_MONITOR_DISCONNECTED_AC_HIBERNATE:
+        actions.setDisconnectedAC(INDEX_HIBERNATE);
+        writeConfig();
+    case ID_MONITOR_DISCONNECTED_AC_SHUT_DOWN:
+        actions.setDisconnectedAC(INDEX_SHUT_DOWN);
+        applyDisplayConnectivity();
+        writeConfig();
         break;
     default:
-        if (cmd >= ID_MONITOR_FIRST) {
-            const int index = cmd - ID_MONITOR_FIRST;
-            const wstring &clicked = displayList->at(index);
-            const auto found = keepAwakeDisplays.find(clicked);
-            if (found != keepAwakeDisplays.end()) {
-                keepAwakeDisplays.erase(found);
-            } else {
-                keepAwakeDisplays.insert(clicked);
-            }
-            applyDisplayConnectivity();
-            writeConfig();
-        }
+        break;
     }
     if (ret != ERROR_SUCCESS) {
         SHOW_ERROR(ret);
@@ -515,8 +680,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     case UM_NOTIFY:
         if (lParam == WM_LBUTTONUP || lParam == WM_RBUTTONUP) {
             SetForegroundWindow(hwnd);
-            vector<wstring> *displayList = NULL;
-            HMENU menu = createNotifyPopupMenu(&displayList);
+            HMENU menu = createNotifyPopupMenu();
             POINT pt = {0};
             GetCursorPos(&pt);
             UINT_PTR cmd = TrackPopupMenu(menu,
@@ -526,9 +690,8 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                                           hwnd, NULL);
             DestroyMenu(menu);
             if (cmd != 0) {
-                processNotifyMenuCmd(hwnd, cmd, displayList);
+                processNotifyMenuCmd(hwnd, cmd);
             }
-            delete displayList;
         }
         return 0;
     case WM_DEVICECHANGE:

@@ -7,7 +7,7 @@ using namespace std;
 // https://docs.microsoft.com/en-us/windows/win32/power/power-setting-guids
 // https://docs.microsoft.com/en-us/windows/win32/power/power-management-functions
 
-DWORD writeLidCloseActionIndex_Battery(DWORD index) {
+DWORD writeLidCloseActionIndexDC(DWORD index) {
     GUID *curPowerScheme = NULL;
     DWORD ret = PowerGetActiveScheme(NULL, &curPowerScheme);
     if (ret != ERROR_SUCCESS) {
@@ -18,7 +18,7 @@ DWORD writeLidCloseActionIndex_Battery(DWORD index) {
                                   index);
 }
 
-DWORD writeLidCloseActionIndex_PluggedIn(DWORD index) {
+DWORD writeLidCloseActionIndexAC(DWORD index) {
     GUID *curPowerScheme = NULL;
     DWORD ret = PowerGetActiveScheme(NULL, &curPowerScheme);
     if (ret != ERROR_SUCCESS) {
@@ -29,7 +29,7 @@ DWORD writeLidCloseActionIndex_PluggedIn(DWORD index) {
                                   index);
 }
 
-DWORD readLidCloseActionIndex_Battery(DWORD *index) {
+DWORD readLidCloseActionIndexDC(DWORD *index) {
     GUID *curPowerScheme = NULL;
     DWORD ret = PowerGetActiveScheme(NULL, &curPowerScheme);
     if (ret != ERROR_SUCCESS) {
@@ -40,7 +40,7 @@ DWORD readLidCloseActionIndex_Battery(DWORD *index) {
                                  index);
 }
 
-DWORD readLidCloseActionIndex_PluggedIn(DWORD *index) {
+DWORD readLidCloseActionIndexAC(DWORD *index) {
     GUID *curPowerScheme = NULL;
     DWORD ret = PowerGetActiveScheme(NULL, &curPowerScheme);
     if (ret != ERROR_SUCCESS) {
