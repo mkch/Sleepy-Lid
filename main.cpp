@@ -18,6 +18,9 @@
 using namespace std;
 
 static HINSTANCE hInstance = NULL;
+// Silent mode: do not show notification on start.
+static bool silentMode = false;
+
 // ID of Shell_NotifyIconW.
 static const UINT NOTIFY_ID = 1;
 // Notify message used by Shell_NotifyIconW.
@@ -30,6 +33,8 @@ static const auto CONFIG_FILE_NAME = L"SleepyLid.ini";
 wstring moduleFilePath;
 // The path of config file. Initialized in entry point.
 wstring configFilePath;
+// The command written to registry to enable-start-on-boot.
+wstring startOnBootCmd;
 
 static const auto START_ON_BOOT_REG_SUB_KEY =
     L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -37,7 +42,7 @@ static const auto START_ON_BOOT_REG_SUB_KEY =
 static const auto START_ON_BOOT_REG_VALUE_NAME = L"SleepyLid";
 
 int _main(HINSTANCE hInstance, int argc, wchar_t *argv[], int nCmdShow);
-void showNotification(HWND hwnd);
+void showNotification(HWND hwnd, bool silent = false);
 void removeNotification(HWND hwnd);
 void applyDisplayConnectivity();
 void showError(const wchar_t *msg);
@@ -201,12 +206,16 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 static bool alreadyRunning();
 
 int _main(HINSTANCE instanceHandle, int argc, wchar_t *argv[], int nCmdShow) {
-    hInstance = instanceHandle;
-
     if (alreadyRunning()) {
         MessageBoxW(NULL, loadStringRes(STR_ALREADY_RUNNING).c_str(), loadStringRes(STR_APP_NAME).c_str(), MB_ICONERROR);
         return 1;
     }
+    if (argc > 1) {
+        const auto argv1 = wstring(argv[1]);
+        silentMode = (argv1 == L"/silent" || argv1 == L"-silent");
+    }
+    hInstance = instanceHandle;
+
     // Initialize configFilePath.
     moduleFilePath = argv[0];
     configFilePath = moduleFilePath;
@@ -214,6 +223,7 @@ int _main(HINSTANCE instanceHandle, int argc, wchar_t *argv[], int nCmdShow) {
     if (sep != string::npos) {
         configFilePath = configFilePath.substr(0, sep + 1) + CONFIG_FILE_NAME;
     }
+    startOnBootCmd = wstring(L"\"") + moduleFilePath + L"\" /silent";
 
     readConfig();
 
@@ -374,7 +384,7 @@ bool startOnBootEnabled() {
         return false;
     } else {
         auto equal =
-            std::equal(moduleFilePath.begin(), moduleFilePath.end(),
+            std::equal(startOnBootCmd.begin(), startOnBootCmd.end(),
                        value, value + read / sizeof(wchar_t) - 1,
                        [](auto a, auto b) { return tolower(a) == tolower(b); });
         return equal;
@@ -391,7 +401,7 @@ void enableStartOnBoot() {
     } else {
         ret = RegSetValueExW(key, START_ON_BOOT_REG_VALUE_NAME,
                              0, REG_SZ,
-                             (const BYTE *)moduleFilePath.c_str(), moduleFilePath.size() * sizeof(wchar_t));
+                             (const BYTE *)startOnBootCmd.c_str(), startOnBootCmd.size() * sizeof(wchar_t));
         if (ret != ERROR_SUCCESS) {
             SHOW_ERROR(ret);
         }
@@ -723,7 +733,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         }
         break;
     case WM_CREATE:
-        showNotification(hwnd);
+        showNotification(hwnd, silentMode);
         break;
     case WM_CLOSE:
         DestroyWindow(hwnd);
@@ -737,12 +747,18 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
-void showNotification(HWND hwnd) {
+void showNotification(HWND hwnd, bool silent) {
     NOTIFYICONDATAW data = {0};
     data.cbSize = sizeof data;
     data.hWnd = hwnd;
     data.uID = NOTIFY_ID;
     data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
+    if (!silent) {
+        data.uFlags |= NIF_INFO;
+        StringCbCopyW(data.szInfo, sizeof(data.szInfo), loadStringRes(STR_RUNNING_IN_SYSTEM_TRAY).c_str());
+        StringCbCopyW(data.szInfoTitle, sizeof(data.szInfoTitle), loadStringRes(STR_APP_NAME).c_str());
+        data.dwInfoFlags = NIIF_INFO;
+    }
     data.uCallbackMessage = UM_NOTIFY;
     data.hIcon = LoadIconW(GetModuleHandle(NULL), MAKEINTRESOURCEW(ICON_MAIN));
     StringCchCopyW(data.szTip, sizeof data.szTip / sizeof data.szTip[0], loadStringRes(STR_APP_NAME).c_str());

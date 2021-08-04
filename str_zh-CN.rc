@@ -23,4 +23,5 @@ BEGIN
     STR_OFF L"关"
     STR_UNKNOWN L"???"
     STR_ALREADY_RUNNING L"已经在运行了！"
+    STR_RUNNING_IN_SYSTEM_TRAY "已成功启动。请点击通知区图标进行更多设置。"
 END

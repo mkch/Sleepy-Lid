@@ -21,4 +21,5 @@ BEGIN
     STR_OFF "OFF"
     STR_UNKNOWN "???"
     STR_ALREADY_RUNNING "Already running!"
+    STR_RUNNING_IN_SYSTEM_TRAY "Started successfully. Please click the system tray icon for settings."
 END
