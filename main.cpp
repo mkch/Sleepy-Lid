@@ -170,19 +170,32 @@ void writeConfig() {
                                configFilePath.c_str());
 }
 
-// Show a message box with the error description of lastError.
-void showError(DWORD lastError, char *file, int line) {
-    char *msg = NULL;
-    FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                   NULL, lastError, 0, (LPSTR)&msg, 0, NULL);
+void showError(const wchar_t *msg) {
+    MessageBoxW(NULL, msg, APP_NAME, MB_ICONERROR);
+}
 
-    char message[1024] = {0};
-    _snprintf(message, sizeof message / sizeof message[0], "%s:%d\n%s", file, line, msg);
-    MessageBoxA(NULL, message, "Error", MB_ICONERROR);
+void showError(const wchar_t *msg, const wchar_t *file, int line) {
+    wchar_t message[1024] = {0};
+    StringCbPrintfW(message, sizeof message, L"%s:%d\n%s", file, line, msg);
+    showError(message);
+}
+
+// Show a message box with the error description of lastError.
+void showError(DWORD lastError, const wchar_t *file, int line) {
+    wchar_t *msg = NULL;
+    FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                   NULL, lastError, 0, (LPWSTR)&msg, 0, NULL);
+    showError(msg, file, line);
     LocalFree(msg);
 }
 
-#define SHOW_ERROR(err) showError(err, __FILE__, __LINE__)
+#define _WT(str) L""##str
+// Should be:
+// #define W__FILE__ L""##__FILE__
+// But the linter of VSCode does not like it(bug?).
+#define W__FILE__ _WT(__FILE__)
+
+#define SHOW_ERROR(err) showError(err, W__FILE__, __LINE__)
 #define SHOW_LAST_ERROR() SHOW_ERROR(GetLastError())
 
 LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
