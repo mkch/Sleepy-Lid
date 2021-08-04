@@ -14,6 +14,28 @@
 #include "power.h"
 #include "res.h"
 
+#define APP_NAME L"Sleepy Lid"
+static const auto LABEL_DO_NOTHING = L"Do nothing";
+static const auto LABEL_SLEEP = L"Sleep";
+static const auto LABEL_HIBERNATE = L"Hibernate";
+static const auto LABEL_SHUT_DOWN = L"Shut down";
+static const auto LABEL_USING_BATTERY = L"Using battery";
+static const auto LABEL_PLUGGED_IN = L"Plugged in";
+static const auto FMT_ON_BATTERY = L"On battery: [%s]";
+static const auto FMT_PLUGGED_IN = L"Plugged in: [%s]";
+static const auto FMT_MONITOR_CONNECTED_DC = L"Monitor connected, on battery: [%s]";
+static const auto FMT_MONITOR_CONNECTED_AC = L"Monitor connected, plugged in: [%s]";
+static const auto FMT_MONITOR_DISCONNECTED_DC = L"Monitor disconnected, on battery: [%s]";
+static const auto FMT_MONITOR_DISCONNECTED_AC = L"Monitor disconnected, plugged in: [%s]";
+static const auto LABEL_SYNC_MONITOR = L"Sync with external monitor";
+static const auto LABEL_WHEN_LID_CLOSING = L"When lid closing";
+static const auto LABEL_EXIT = L"Exit";
+static const auto LABEL_START_ON_BOOT = L"Start on boot";
+static const auto LABEL_ON = L"ON";
+static const auto LABEL_OFF = L"OFF";
+static const auto LABEL_UNKNOWN = L"???";
+static const auto LABEL_ALREADY_RUNNING = L"Already running!";
+
 using namespace std;
 
 class monitorActions {
@@ -164,9 +186,13 @@ void showError(DWORD lastError, char *file, int line) {
 #define SHOW_LAST_ERROR() SHOW_ERROR(GetLastError())
 
 LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+static bool alreadyRunning();
 
 int _main(HINSTANCE hInstance, int argc, wchar_t *argv[], int nCmdShow) {
-    // SetProcessDPIAware();
+    if (alreadyRunning()) {
+        MessageBoxW(NULL, LABEL_ALREADY_RUNNING, APP_NAME, MB_ICONERROR);
+        return 1;
+    }
     // Initialize configFilePath.
     moduleFilePath = argv[0];
     configFilePath = moduleFilePath;
@@ -217,6 +243,15 @@ int _main(HINSTANCE hInstance, int argc, wchar_t *argv[], int nCmdShow) {
         DispatchMessage(&msg);
     }
     return msg.wParam;
+}
+
+static const auto RUNNING_MUTEX_NAME = APP_NAME L" running";
+static bool alreadyRunning() {
+    if (CreateMutexW(NULL, FALSE, RUNNING_MUTEX_NAME) == NULL) {
+        SHOW_LAST_ERROR();
+        std::exit(1);
+    }
+    return GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
 // Timer id for delaying the WM_DEVICECHANGE message processing.
@@ -299,28 +334,6 @@ enum {
     ID_MONITOR_DISCONNECTED_AC_HIBERNATE,
     ID_MONITOR_DISCONNECTED_AC_SHUT_DOWN,
 };
-
-static const auto APP_NAME = L"Sleepy Lid";
-static const auto LABEL_DO_NOTHING = L"Do nothing";
-static const auto LABEL_SLEEP = L"Sleep";
-static const auto LABEL_HIBERNATE = L"Hibernate";
-static const auto LABEL_SHUT_DOWN = L"Shut down";
-static const auto LABEL_USING_BATTERY = L"Using battery";
-static const auto LABEL_PLUGGED_IN = L"Plugged in";
-static const auto FMT_ON_BATTERY = L"On battery: [%s]";
-static const auto FMT_PLUGGED_IN = L"Plugged in: [%s]";
-static const auto FMT_MONITOR_CONNECTED_DC = L"Monitor connected, on battery: [%s]";
-static const auto FMT_MONITOR_CONNECTED_AC = L"Monitor connected, plugged in: [%s]";
-static const auto FMT_MONITOR_DISCONNECTED_DC = L"Monitor disconnected, on battery: [%s]";
-static const auto FMT_MONITOR_DISCONNECTED_AC = L"Monitor disconnected, plugged in: [%s]";
-static const auto LABEL_SYNC_MONITOR = L"Sync with external monitor";
-static const auto LABEL_WHEN_LID_CLOSING = L"When lid closing";
-static const auto LABEL_EXIT = L"Exit";
-static const auto LABEL_START_ON_BOOT = L"Start on boot";
-static const auto LABEL_ON = L"ON";
-static const auto LABEL_OFF = L"OFF";
-
-static const auto LABEL_UNKNOWN = L"???";
 
 static const wchar_t *powerActionToString(DWORD index) {
     switch (index) {
