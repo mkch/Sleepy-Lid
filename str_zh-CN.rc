@@ -1,0 +1,26 @@
+// https://docs.microsoft.com/en-us/windows-hardware/manufacture/desktop/available-language-packs-for-windows
+LANGUAGE LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED
+STRINGTABLE
+BEGIN
+    STR_APP_NAME L"盖眠"
+    STR_DO_NOTHING L"不采取任何操作"
+    STR_SLEEP L"睡眠"
+    STR_HIBERNATE L"休眠"
+    STR_SHUT_DOWN L"关机"
+    STR_USING_BATTERY L"用电池"
+    STR_PLUGGED_IN L"接通电源"
+    STR_FMT_ON_BATTERY L"用电池: [%s]"
+    STR_FMT_PLUGGED_IN L"接通电源: [%s]"
+    STR_FMT_MONITOR_CONNECTED_DC L"连接显示器，用电池: [%s]"
+    STR_FMT_MONITOR_CONNECTED_AC L"连接显示器，接通电源: [%s]"
+    STR_FMT_MONITOR_DISCONNECTED_DC L"未连接显示器，用电池: [%s]"
+    STR_FMT_MONITOR_DISCONNECTED_AC L"未连接显示器，接通电源: [%s]"
+    STR_SYNC_MONITOR L"与外接显示同步"
+    STR_WHEN_LID_CLOSING L"关闭盖子时"
+    STR_EXIT L"退出"
+    STR_START_ON_BOOT L"开机启动"
+    STR_ON L"开"
+    STR_OFF L"关"
+    STR_UNKNOWN L"???"
+    STR_ALREADY_RUNNING L"已经在运行了！"
+END

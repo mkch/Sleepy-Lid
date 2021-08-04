@@ -1,4 +1,9 @@
 #include "res.h"
+#include <windows.h>
+#include "res.h"
+#pragma code_page(65001) // UTF-8. Following included files MUST be UTF-8 encoding.
+#include "str.rc"
+#include "str_zh-CN.rc"
 
 ICON_MAIN ICON main.ico
 1 24 manifest.xml

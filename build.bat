@@ -28,7 +28,7 @@ set link_flags=/SUBSYSTEM:%subsystem%
 if not exist %build_dir% mkdir %build_dir%
 
 rem compile resources.
-rc /fo %build_dir%\\res.res res.rc
+rc /nologo /fo %build_dir%\\res.res res.rc
 if errorlevel 1 exit
 
 cl /nologo /utf-8 %cl_flags% /D WINVER=0x0A00 /D _WIN32_WINNT=0x0A00  /D WIN32_LEAN_AND_MEAN *.cpp /link %link_flags% %build_dir%\\res.res User32.lib Shell32.lib Comctl32.lib Advapi32.lib PowrProf.lib

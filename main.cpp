@@ -9,34 +9,61 @@
 #include <vector>
 #include <set>
 #include <array>
+#include <map>
 
 #include "monitor.h"
 #include "power.h"
 #include "res.h"
 
-#define APP_NAME L"Sleepy Lid"
-static const auto LABEL_DO_NOTHING = L"Do nothing";
-static const auto LABEL_SLEEP = L"Sleep";
-static const auto LABEL_HIBERNATE = L"Hibernate";
-static const auto LABEL_SHUT_DOWN = L"Shut down";
-static const auto LABEL_USING_BATTERY = L"Using battery";
-static const auto LABEL_PLUGGED_IN = L"Plugged in";
-static const auto FMT_ON_BATTERY = L"On battery: [%s]";
-static const auto FMT_PLUGGED_IN = L"Plugged in: [%s]";
-static const auto FMT_MONITOR_CONNECTED_DC = L"Monitor connected, on battery: [%s]";
-static const auto FMT_MONITOR_CONNECTED_AC = L"Monitor connected, plugged in: [%s]";
-static const auto FMT_MONITOR_DISCONNECTED_DC = L"Monitor disconnected, on battery: [%s]";
-static const auto FMT_MONITOR_DISCONNECTED_AC = L"Monitor disconnected, plugged in: [%s]";
-static const auto LABEL_SYNC_MONITOR = L"Sync with external monitor";
-static const auto LABEL_WHEN_LID_CLOSING = L"When lid closing";
-static const auto LABEL_EXIT = L"Exit";
-static const auto LABEL_START_ON_BOOT = L"Start on boot";
-static const auto LABEL_ON = L"ON";
-static const auto LABEL_OFF = L"OFF";
-static const auto LABEL_UNKNOWN = L"???";
-static const auto LABEL_ALREADY_RUNNING = L"Already running!";
-
 using namespace std;
+
+static HINSTANCE hInstance = NULL;
+// ID of Shell_NotifyIconW.
+static const UINT NOTIFY_ID = 1;
+// Notify message used by Shell_NotifyIconW.
+static const UINT UM_NOTIFY = WM_USER + 1;
+
+// The extension of config file.
+static const auto CONFIG_FILE_NAME = L"SleepyLid.ini";
+
+// The arv[0]. GetModuleFileNameW(0).
+wstring moduleFilePath;
+// The path of config file. Initialized in entry point.
+wstring configFilePath;
+
+static const auto START_ON_BOOT_REG_SUB_KEY =
+    L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
+// The registry key under
+static const auto START_ON_BOOT_REG_VALUE_NAME = L"SleepyLid";
+
+int _main(HINSTANCE hInstance, int argc, wchar_t *argv[], int nCmdShow);
+void showNotification(HWND hwnd);
+void removeNotification(HWND hwnd);
+void applyDisplayConnectivity();
+void showError(const wchar_t *msg);
+void showError(const wchar_t *msg, const wchar_t *file, int line);
+void showError(DWORD lastError, const wchar_t *file, int line);
+
+#define _WT(str) L""##str
+// Should be:
+// #define W__FILE__ L""##__FILE__
+// But the linter of VSCode does not like it(bug?).
+#define W__FILE__ _WT(__FILE__)
+
+#define SHOW_ERROR(err) showError(err, W__FILE__, __LINE__)
+#define SHOW_LAST_ERROR() SHOW_ERROR(GetLastError())
+
+#ifdef WINDOWS
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
+    int argc = 0;
+    wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    return _main(hInstance, argc, argv, nCmdShow);
+}
+#else
+int wmain(int argc, wchar_t *argv[]) {
+    return _main(GetModuleHandle(NULL), argc, argv, SW_SHOW);
+}
+#endif
 
 class monitorActions {
 private:
@@ -104,43 +131,24 @@ public:
     }
 };
 
-// ID of Shell_NotifyIconW.
-static const UINT NOTIFY_ID = 1;
-// Notify message used by Shell_NotifyIconW.
-static const UINT UM_NOTIFY = WM_USER + 1;
+static map<UINT, wstring> stringResMap;
+const wstring &loadStringRes(UINT resId) {
+    const auto it = stringResMap.find(resId);
+    if (it != stringResMap.end()) {
+        return it->second;
+    }
+    wchar_t *buf = NULL;
+    const int n = LoadStringW(hInstance, resId, (LPWSTR)&buf, 0);
+    if (n == 0) {
+        SHOW_LAST_ERROR();
+        std::exit(1);
+    }
+    stringResMap[resId] = wstring(buf, n);
+    return stringResMap[resId];
+}
 
 static bool syncMonitor = false;
 static monitorActions actions;
-
-// The extension of config file.
-static const auto CONFIG_FILE_NAME = L"SleepyLid.ini";
-
-// The arv[0]. GetModuleFileNameW(0).
-wstring moduleFilePath;
-// The path of config file. Initialized in entry point.
-wstring configFilePath;
-
-static const auto START_ON_BOOT_REG_SUB_KEY =
-    L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
-// The registry key under
-static const auto START_ON_BOOT_REG_VALUE_NAME = L"SleepyLid";
-
-int _main(HINSTANCE hInstance, int argc, wchar_t *argv[], int nCmdShow);
-void showNotification(HWND hwnd);
-void removeNotification(HWND hwnd);
-void applyDisplayConnectivity();
-
-#ifdef WINDOWS
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
-    int argc = 0;
-    wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    return _main(hInstance, argc, argv, nCmdShow);
-}
-#else
-int wmain(int argc, wchar_t *argv[]) {
-    return _main(GetModuleHandle(NULL), argc, argv, SW_SHOW);
-}
-#endif
 
 // ini section name.
 static const auto CONFIG_LID_CLOSING = L"LidClosing";
@@ -171,7 +179,7 @@ void writeConfig() {
 }
 
 void showError(const wchar_t *msg) {
-    MessageBoxW(NULL, msg, APP_NAME, MB_ICONERROR);
+    MessageBoxW(NULL, msg, loadStringRes(STR_APP_NAME).c_str(), MB_ICONERROR);
 }
 
 void showError(const wchar_t *msg, const wchar_t *file, int line) {
@@ -189,21 +197,14 @@ void showError(DWORD lastError, const wchar_t *file, int line) {
     LocalFree(msg);
 }
 
-#define _WT(str) L""##str
-// Should be:
-// #define W__FILE__ L""##__FILE__
-// But the linter of VSCode does not like it(bug?).
-#define W__FILE__ _WT(__FILE__)
-
-#define SHOW_ERROR(err) showError(err, W__FILE__, __LINE__)
-#define SHOW_LAST_ERROR() SHOW_ERROR(GetLastError())
-
 LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 static bool alreadyRunning();
 
-int _main(HINSTANCE hInstance, int argc, wchar_t *argv[], int nCmdShow) {
+int _main(HINSTANCE instanceHandle, int argc, wchar_t *argv[], int nCmdShow) {
+    hInstance = instanceHandle;
+
     if (alreadyRunning()) {
-        MessageBoxW(NULL, LABEL_ALREADY_RUNNING, APP_NAME, MB_ICONERROR);
+        MessageBoxW(NULL, loadStringRes(STR_ALREADY_RUNNING).c_str(), loadStringRes(STR_APP_NAME).c_str(), MB_ICONERROR);
         return 1;
     }
     // Initialize configFilePath.
@@ -258,7 +259,7 @@ int _main(HINSTANCE hInstance, int argc, wchar_t *argv[], int nCmdShow) {
     return msg.wParam;
 }
 
-static const auto RUNNING_MUTEX_NAME = APP_NAME L" running";
+static const auto RUNNING_MUTEX_NAME = L"Sleepy Lid is running";
 static bool alreadyRunning() {
     if (CreateMutexW(NULL, FALSE, RUNNING_MUTEX_NAME) == NULL) {
         SHOW_LAST_ERROR();
@@ -348,18 +349,18 @@ enum {
     ID_MONITOR_DISCONNECTED_AC_SHUT_DOWN,
 };
 
-static const wchar_t *powerActionToString(DWORD index) {
+static const wstring &powerActionToString(DWORD index) {
     switch (index) {
     case INDEX_DO_NOTHING:
-        return LABEL_DO_NOTHING;
+        return loadStringRes(STR_DO_NOTHING);
     case INDEX_SLEEP:
-        return LABEL_SLEEP;
+        return loadStringRes(STR_SLEEP);
     case INDEX_HIBERNATE:
-        return LABEL_HIBERNATE;
+        return loadStringRes(STR_HIBERNATE);
     case INDEX_SHUT_DOWN:
-        return LABEL_SHUT_DOWN;
+        return loadStringRes(STR_SHUT_DOWN);
     default:
-        return LABEL_UNKNOWN;
+        return loadStringRes(STR_UNKNOWN);
     }
 }
 
@@ -432,135 +433,135 @@ HMENU createNotifyPopupMenu() {
     const HMENU onBattery = CreateMenu();
     AppendMenuW(onBattery,
                 MF_STRING | (actionBattery == INDEX_DO_NOTHING ? MF_CHECKED : 0),
-                ID_DC_DO_NOTHING, LABEL_DO_NOTHING);
+                ID_DC_DO_NOTHING, loadStringRes(STR_DO_NOTHING).c_str());
     AppendMenuW(onBattery,
                 MF_STRING | (actionBattery == INDEX_SLEEP ? MF_CHECKED : 0),
-                ID_DC_SLEEP, LABEL_SLEEP);
+                ID_DC_SLEEP, loadStringRes(STR_SLEEP).c_str());
     AppendMenuW(onBattery,
                 MF_STRING | (actionBattery == INDEX_HIBERNATE ? MF_CHECKED : 0),
-                ID_DC_HIBERNATE, LABEL_HIBERNATE);
+                ID_DC_HIBERNATE, loadStringRes(STR_HIBERNATE).c_str());
     AppendMenuW(onBattery,
                 MF_STRING | (actionBattery == INDEX_SHUT_DOWN ? MF_CHECKED : 0),
-                ID_DC_SHUT_DOWN, LABEL_SHUT_DOWN);
+                ID_DC_SHUT_DOWN, loadStringRes(STR_SHUT_DOWN).c_str());
 
     HMENU pluggedIn = CreateMenu();
     AppendMenuW(pluggedIn,
                 MF_STRING | (actionPluggedIn == INDEX_DO_NOTHING ? MF_CHECKED : 0),
-                ID_AC_DO_NOTHING, LABEL_DO_NOTHING);
+                ID_AC_DO_NOTHING, loadStringRes(STR_DO_NOTHING).c_str());
     AppendMenuW(pluggedIn,
                 MF_STRING | (actionPluggedIn == INDEX_SLEEP ? MF_CHECKED : 0),
-                ID_AC_SLEEP, LABEL_SLEEP);
+                ID_AC_SLEEP, loadStringRes(STR_SLEEP).c_str());
     AppendMenuW(pluggedIn,
                 MF_STRING | (actionPluggedIn == INDEX_HIBERNATE ? MF_CHECKED : 0),
-                ID_AC_HIBERNATE, LABEL_HIBERNATE);
+                ID_AC_HIBERNATE, loadStringRes(STR_HIBERNATE).c_str());
     AppendMenuW(pluggedIn,
                 MF_STRING | (actionPluggedIn == INDEX_SHUT_DOWN ? MF_CHECKED : 0),
-                ID_AC_SHUT_DOWN, LABEL_SHUT_DOWN);
+                ID_AC_SHUT_DOWN, loadStringRes(STR_SHUT_DOWN).c_str());
 
     const HMENU monitorConnectedDC = CreateMenu();
     AppendMenuW(monitorConnectedDC,
                 MF_STRING | (actions.connectedDC() == INDEX_DO_NOTHING ? MF_CHECKED : 0),
-                ID_MONITOR_CONNECTED_DC_DO_NOTHING, LABEL_DO_NOTHING);
+                ID_MONITOR_CONNECTED_DC_DO_NOTHING, loadStringRes(STR_DO_NOTHING).c_str());
     AppendMenuW(monitorConnectedDC,
                 MF_STRING | (actions.connectedDC() == INDEX_SLEEP ? MF_CHECKED : 0),
-                ID_MONITOR_CONNECTED_DC_SLEEP, LABEL_SLEEP);
+                ID_MONITOR_CONNECTED_DC_SLEEP, loadStringRes(STR_SLEEP).c_str());
     AppendMenuW(monitorConnectedDC,
                 MF_STRING | (actions.connectedDC() == INDEX_HIBERNATE ? MF_CHECKED : 0),
-                ID_MONITOR_CONNECTED_DC_HIBERNATE, LABEL_HIBERNATE);
+                ID_MONITOR_CONNECTED_DC_HIBERNATE, loadStringRes(STR_HIBERNATE).c_str());
     AppendMenuW(monitorConnectedDC,
                 MF_STRING | (actions.connectedDC() == INDEX_SHUT_DOWN ? MF_CHECKED : 0),
-                ID_MONITOR_CONNECTED_DC_SHUT_DOWN, LABEL_SHUT_DOWN);
+                ID_MONITOR_CONNECTED_DC_SHUT_DOWN, loadStringRes(STR_SHUT_DOWN).c_str());
 
     const HMENU monitorConnectedAC = CreateMenu();
     AppendMenuW(monitorConnectedAC,
                 MF_STRING | (actions.connectedAC() == INDEX_DO_NOTHING ? MF_CHECKED : 0),
-                ID_MONITOR_CONNECTED_AC_DO_NOTHING, LABEL_DO_NOTHING);
+                ID_MONITOR_CONNECTED_AC_DO_NOTHING, loadStringRes(STR_DO_NOTHING).c_str());
     AppendMenuW(monitorConnectedAC,
                 MF_STRING | (actions.connectedAC() == INDEX_SLEEP ? MF_CHECKED : 0),
-                ID_MONITOR_CONNECTED_AC_SLEEP, LABEL_SLEEP);
+                ID_MONITOR_CONNECTED_AC_SLEEP, loadStringRes(STR_SLEEP).c_str());
     AppendMenuW(monitorConnectedAC,
                 MF_STRING | (actions.connectedAC() == INDEX_HIBERNATE ? MF_CHECKED : 0),
-                ID_MONITOR_CONNECTED_AC_HIBERNATE, LABEL_HIBERNATE);
+                ID_MONITOR_CONNECTED_AC_HIBERNATE, loadStringRes(STR_HIBERNATE).c_str());
     AppendMenuW(monitorConnectedAC,
                 MF_STRING | (actions.connectedAC() == INDEX_SHUT_DOWN ? MF_CHECKED : 0),
-                ID_MONITOR_CONNECTED_AC_SHUT_DOWN, LABEL_SHUT_DOWN);
+                ID_MONITOR_CONNECTED_AC_SHUT_DOWN, loadStringRes(STR_SHUT_DOWN).c_str());
 
     const HMENU monitorDisconnectedDC = CreateMenu();
     AppendMenuW(monitorDisconnectedDC,
                 MF_STRING | (actions.disconnectedDC() == INDEX_DO_NOTHING ? MF_CHECKED : 0),
-                ID_MONITOR_DISCONNECTED_DC_DO_NOTHING, LABEL_DO_NOTHING);
+                ID_MONITOR_DISCONNECTED_DC_DO_NOTHING, loadStringRes(STR_DO_NOTHING).c_str());
     AppendMenuW(monitorDisconnectedDC,
                 MF_STRING | (actions.disconnectedDC() == INDEX_SLEEP ? MF_CHECKED : 0),
-                ID_MONITOR_DISCONNECTED_DC_SLEEP, LABEL_SLEEP);
+                ID_MONITOR_DISCONNECTED_DC_SLEEP, loadStringRes(STR_SLEEP).c_str());
     AppendMenuW(monitorDisconnectedDC,
                 MF_STRING | (actions.disconnectedDC() == INDEX_HIBERNATE ? MF_CHECKED : 0),
-                ID_MONITOR_DISCONNECTED_DC_HIBERNATE, LABEL_HIBERNATE);
+                ID_MONITOR_DISCONNECTED_DC_HIBERNATE, loadStringRes(STR_HIBERNATE).c_str());
     AppendMenuW(monitorDisconnectedDC,
                 MF_STRING | (actions.disconnectedDC() == INDEX_SHUT_DOWN ? MF_CHECKED : 0),
-                ID_MONITOR_DISCONNECTED_DC_SHUT_DOWN, LABEL_SHUT_DOWN);
+                ID_MONITOR_DISCONNECTED_DC_SHUT_DOWN, loadStringRes(STR_SHUT_DOWN).c_str());
 
     const HMENU monitorDisconnectedAC = CreateMenu();
     AppendMenuW(monitorDisconnectedAC,
                 MF_STRING | (actions.disconnectedAC() == INDEX_DO_NOTHING ? MF_CHECKED : 0),
-                ID_MONITOR_DISCONNECTED_AC_DO_NOTHING, LABEL_DO_NOTHING);
+                ID_MONITOR_DISCONNECTED_AC_DO_NOTHING, loadStringRes(STR_DO_NOTHING).c_str());
     AppendMenuW(monitorDisconnectedAC,
                 MF_STRING | (actions.disconnectedAC() == INDEX_SLEEP ? MF_CHECKED : 0),
-                ID_MONITOR_DISCONNECTED_AC_SLEEP, LABEL_SLEEP);
+                ID_MONITOR_DISCONNECTED_AC_SLEEP, loadStringRes(STR_SLEEP).c_str());
     AppendMenuW(monitorDisconnectedAC,
                 MF_STRING | (actions.disconnectedAC() == INDEX_HIBERNATE ? MF_CHECKED : 0),
-                ID_MONITOR_DISCONNECTED_AC_HIBERNATE, LABEL_HIBERNATE);
+                ID_MONITOR_DISCONNECTED_AC_HIBERNATE, loadStringRes(STR_HIBERNATE).c_str());
     AppendMenuW(monitorDisconnectedAC,
                 MF_STRING | (actions.disconnectedAC() == INDEX_SHUT_DOWN ? MF_CHECKED : 0),
-                ID_MONITOR_DISCONNECTED_AC_SHUT_DOWN, LABEL_SHUT_DOWN);
+                ID_MONITOR_DISCONNECTED_AC_SHUT_DOWN, loadStringRes(STR_SHUT_DOWN).c_str());
 
     std::array<wchar_t, 1024> buf;
 
     const HMENU monitor = CreateMenu();
-    AppendMenuW(monitor, MF_STRING | (syncMonitor ? MF_CHECKED : 0), ID_SYNC_MONITOR, (syncMonitor ? LABEL_ON : LABEL_OFF));
+    AppendMenuW(monitor, MF_STRING | (syncMonitor ? MF_CHECKED : 0), ID_SYNC_MONITOR, loadStringRes(syncMonitor ? STR_ON : STR_OFF).c_str());
     SetMenuDefaultItem(monitor, 0, TRUE);
 
     StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
-                    FMT_MONITOR_CONNECTED_DC,
-                    powerActionToString(actions.connectedDC()));
+                    loadStringRes(STR_FMT_MONITOR_CONNECTED_DC).c_str(),
+                    powerActionToString(actions.connectedDC()).c_str());
     AppendMenuW(monitor, MF_STRING | MF_POPUP | MF_MENUBARBREAK | (syncMonitor ? 0 : MF_GRAYED), (UINT_PTR)monitorConnectedDC, buf.data());
     StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
-                    FMT_MONITOR_CONNECTED_AC,
-                    powerActionToString(actions.connectedAC()));
+                    loadStringRes(STR_FMT_MONITOR_CONNECTED_AC).c_str(),
+                    powerActionToString(actions.connectedAC()).c_str());
     AppendMenuW(monitor, MF_STRING | MF_POPUP | (syncMonitor ? 0 : MF_GRAYED), (UINT_PTR)monitorConnectedAC, buf.data());
 
     AppendMenuW(monitor, MF_SEPARATOR, 0, NULL);
 
     StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
-                    FMT_MONITOR_DISCONNECTED_DC,
-                    powerActionToString(actions.disconnectedDC()));
+                    loadStringRes(STR_FMT_MONITOR_DISCONNECTED_DC).c_str(),
+                    powerActionToString(actions.disconnectedDC()).c_str());
     AppendMenuW(monitor, MF_STRING | MF_POPUP | (syncMonitor ? 0 : MF_GRAYED), (UINT_PTR)monitorDisconnectedDC, buf.data());
     StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
-                    FMT_MONITOR_DISCONNECTED_AC,
-                    powerActionToString(actions.disconnectedAC()));
+                    loadStringRes(STR_FMT_MONITOR_DISCONNECTED_AC).c_str(),
+                    powerActionToString(actions.disconnectedAC()).c_str());
     AppendMenuW(monitor, MF_STRING | MF_POPUP | (syncMonitor ? 0 : MF_GRAYED), (UINT_PTR)monitorDisconnectedAC, buf.data());
 
     const HMENU lidClosing = CreateMenu();
 
     StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
-                    FMT_ON_BATTERY,
-                    powerActionToString(actionBattery));
+                    loadStringRes(STR_FMT_ON_BATTERY).c_str(),
+                    powerActionToString(actionBattery).c_str());
     AppendMenuW(lidClosing, MF_STRING | MF_POPUP, (UINT_PTR)onBattery, buf.data());
     StringCbPrintfW(buf.data(), buf.size() * sizeof(wchar_t),
-                    FMT_PLUGGED_IN,
-                    powerActionToString(actionPluggedIn));
+                    loadStringRes(STR_FMT_PLUGGED_IN).c_str(),
+                    powerActionToString(actionPluggedIn).c_str());
     AppendMenuW(lidClosing, MF_STRING | MF_POPUP, (UINT_PTR)pluggedIn, buf.data());
     AppendMenuW(lidClosing, MF_SEPARATOR, 0, NULL);
 
-    AppendMenuW(lidClosing, MF_STRING | MF_POPUP | (syncMonitor ? MF_CHECKED : 0), (UINT_PTR)monitor, LABEL_SYNC_MONITOR);
+    AppendMenuW(lidClosing, MF_STRING | MF_POPUP | (syncMonitor ? MF_CHECKED : 0), (UINT_PTR)monitor, loadStringRes(STR_SYNC_MONITOR).c_str());
 
     const HMENU menu = CreatePopupMenu();
-    AppendMenuW(menu, MF_POPUP, (UINT_PTR)lidClosing, LABEL_WHEN_LID_CLOSING);
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)lidClosing, loadStringRes(STR_WHEN_LID_CLOSING).c_str());
     AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
 
     AppendMenuW(menu, MF_STRING | (startOnBootEnabled() ? MF_CHECKED : 0),
-                ID_AUTO_RUN, LABEL_START_ON_BOOT);
+                ID_AUTO_RUN, loadStringRes(STR_START_ON_BOOT).c_str());
     AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
-    AppendMenuW(menu, MF_STRING, ID_EXIT, LABEL_EXIT);
+    AppendMenuW(menu, MF_STRING, ID_EXIT, loadStringRes(STR_EXIT).c_str());
     return menu;
 }
 
@@ -744,7 +745,7 @@ void showNotification(HWND hwnd) {
     data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
     data.uCallbackMessage = UM_NOTIFY;
     data.hIcon = LoadIconW(GetModuleHandle(NULL), MAKEINTRESOURCEW(ICON_MAIN));
-    StringCchCopyW(data.szTip, sizeof data.szTip / sizeof data.szTip[0], APP_NAME);
+    StringCchCopyW(data.szTip, sizeof data.szTip / sizeof data.szTip[0], loadStringRes(STR_APP_NAME).c_str());
     if (!Shell_NotifyIconW(NIM_ADD, &data)) {
         SHOW_LAST_ERROR();
         return;
