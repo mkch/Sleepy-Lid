@@ -15,7 +15,7 @@ BEGIN
     STR_FMT_MONITOR_CONNECTED_AC L"连接显示器，接通电源: [%s]"
     STR_FMT_MONITOR_DISCONNECTED_DC L"未连接显示器，用电池: [%s]"
     STR_FMT_MONITOR_DISCONNECTED_AC L"未连接显示器，接通电源: [%s]"
-    STR_SYNC_MONITOR L"与外接显示同步"
+    STR_SYNC_MONITOR L"与外接显示器同步"
     STR_WHEN_LID_CLOSING L"关闭盖子时"
     STR_EXIT L"退出"
     STR_START_ON_BOOT L"开机启动"
