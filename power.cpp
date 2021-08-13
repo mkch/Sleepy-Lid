@@ -13,9 +13,13 @@ DWORD writeLidCloseActionIndexDC(DWORD index) {
     if (ret != ERROR_SUCCESS) {
         return ret;
     }
-    return PowerWriteDCValueIndex(NULL, curPowerScheme,
-                                  &GUID_SYSTEM_BUTTON_SUBGROUP, &GUID_LIDCLOSE_ACTION,
-                                  index);
+    ret = PowerWriteDCValueIndex(NULL, curPowerScheme,
+                                 &GUID_SYSTEM_BUTTON_SUBGROUP, &GUID_LIDCLOSE_ACTION,
+                                 index);
+    if (ret != ERROR_SUCCESS) {
+        return ret;
+    }
+    return PowerSetActiveScheme(NULL, curPowerScheme);
 }
 
 DWORD writeLidCloseActionIndexAC(DWORD index) {
@@ -24,9 +28,13 @@ DWORD writeLidCloseActionIndexAC(DWORD index) {
     if (ret != ERROR_SUCCESS) {
         return ret;
     }
-    return PowerWriteACValueIndex(NULL, curPowerScheme,
-                                  &GUID_SYSTEM_BUTTON_SUBGROUP, &GUID_LIDCLOSE_ACTION,
-                                  index);
+    ret = PowerWriteACValueIndex(NULL, curPowerScheme,
+                                 &GUID_SYSTEM_BUTTON_SUBGROUP, &GUID_LIDCLOSE_ACTION,
+                                 index);
+    if (ret != ERROR_SUCCESS) {
+        return ret;
+    }
+    return PowerSetActiveScheme(NULL, curPowerScheme);
 }
 
 DWORD readLidCloseActionIndexDC(DWORD *index) {
