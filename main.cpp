@@ -287,11 +287,18 @@ static const UINT DEVICE_CHANGE_DELAY = 3000;
 void applyDisplayConnectivity() {
     if (!syncMonitor)
         return;
+    // Last state of external monitors.
+    static int lastConnected = -1;
     bool connected = false;
     auto ret = isExternalMonitorsConnected(&connected);
     if (ret != ERROR_SUCCESS)
         goto handle_error;
-
+    const bool unchanged = connected == (lastConnected == 1);
+    lastConnected = connected ? 1 : 0;
+    // External monitors state was not changed.
+    if (unchanged) {
+        return;
+    }
     if (connected) {
         ret = writeLidCloseActionIndexDC(actions.connectedDC());
         if (ret != ERROR_SUCCESS)
