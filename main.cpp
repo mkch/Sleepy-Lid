@@ -3,6 +3,7 @@
 #include <commctrl.h>
 #include <strsafe.h>
 #include <shellapi.h>
+#include <shlwapi.h>
 
 #include <algorithm>
 #include <string>
@@ -152,6 +153,7 @@ const wstring &loadStringRes(UINT resId) {
     return stringResMap[resId];
 }
 
+static bool configExists = false;
 static bool syncMonitor = false;
 static monitorActions actions;
 
@@ -163,6 +165,10 @@ static const auto CONFIG_MONITOR_POWER_ACTIONS = L"MonitorActions";
 
 // Read settings from config file.
 void readConfig() {
+    if (!PathFileExistsW(configFilePath.c_str())) {
+        return;
+    }
+    configExists = true;
     syncMonitor = GetPrivateProfileIntW(CONFIG_LID_CLOSING, CONFIG_SYNC_MONITOR, 0, configFilePath.c_str()) != 0;
     std::array<wchar_t, 5> buf;
     if (GetPrivateProfileStringW(CONFIG_LID_CLOSING, CONFIG_MONITOR_POWER_ACTIONS, L"0000",
@@ -285,20 +291,16 @@ static const UINT DEVICE_CHANGE_DELAY = 3000;
 
 // Set power action based on the current display connectivity.
 void applyDisplayConnectivity() {
+    if (!configExists) {
+        return;
+    }
     if (!syncMonitor)
         return;
     // Last state of external monitors.
-    static int lastConnected = -1;
     bool connected = false;
     auto ret = isExternalMonitorsConnected(&connected);
     if (ret != ERROR_SUCCESS)
         goto handle_error;
-    const bool unchanged = connected == (lastConnected == 1);
-    lastConnected = connected ? 1 : 0;
-    // External monitors state was not changed.
-    if (unchanged) {
-        return;
-    }
     if (connected) {
         ret = writeLidCloseActionIndexDC(actions.connectedDC());
         if (ret != ERROR_SUCCESS)
